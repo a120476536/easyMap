@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
+import json
 import os
 
 
@@ -134,3 +135,28 @@ class MapElement:
             return max(1, width), max(1, height)  # 确保最小为1
         except (ValueError, TypeError):
             return 64, 64  # 默认值
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """将元素转换为字典（用于序列化）"""
+        return {
+            "id": self.id,
+            "type": self.type.value,
+            "name": self.name,
+            "parent_id": self.parent_id,
+            "pos": list(self.pos),
+            "polyline": [[x, y] for x, y in self.polyline],
+            "settings": self.settings
+        }
+    
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "MapElement":
+        """从字典创建元素（用于反序列化）"""
+        return MapElement(
+            id=data["id"],
+            type=ElementType(data["type"]),
+            name=data["name"],
+            parent_id=data.get("parent_id"),
+            pos=tuple(data["pos"]),
+            polyline=[tuple(point) for point in data.get("polyline", [])],
+            settings=data.get("settings", {})
+        )

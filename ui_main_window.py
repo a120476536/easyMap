@@ -3,7 +3,7 @@ import os
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSize,QRect
+from PySide6.QtCore import Qt, QSize, QRect
 from PySide6.QtGui import QAction, QColor, QIcon, QPixmap, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -156,12 +156,11 @@ class EzMapWindow(QMainWindow):
         self._selected_element_type: ElementType = None
         # 记录是否处于放置模式
         self._is_placing = False
-
-        self.base_color = QColor("#d9d9d9")
-        self.contrast = 0.75
+        
+        # 当前文件路径
+        self.current_filepath: Path = None
 
         # 获取项目根目录和图片目录
-        # self.project_root = Path(__file__).parent
         self.project_root = Path.cwd()
         self.img_dir = self.project_root / "imgs"
         # 确保图片目录存在
@@ -171,10 +170,211 @@ class EzMapWindow(QMainWindow):
         self.custom_img_dir = self.img_dir / "custom"
         self.custom_img_dir.mkdir(exist_ok=True)
         
-        self.setWindowTitle("简易易制地图 - 架空类别地图编辑器（雏形）")
+        self.setWindowTitle("简易易制地图 - 架空类别地图编辑器")
         self.resize(1200, 760)
+        
+        # 创建菜单栏
+        self._create_menu_bar()
         self._setup_ui()
         self.generate_and_draw()
+    
+    def _create_menu_bar(self):
+        """创建菜单栏"""
+        menubar = self.menuBar()
+        
+        # 文件菜单
+        file_menu = menubar.addMenu("文件")
+        
+        # 新建
+        new_action = QAction("新建", self)
+        new_action.setShortcut("Ctrl+N")
+        new_action.triggered.connect(self.new_file)
+        file_menu.addAction(new_action)
+        
+        # 打开
+        open_action = QAction("打开...", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self.open_file)
+        file_menu.addAction(open_action)
+        
+        # 保存
+        save_action = QAction("保存", self)
+        save_action.setShortcut("Ctrl+S")
+        save_action.triggered.connect(self.save_file)
+        file_menu.addAction(save_action)
+        
+        # 另存为
+        save_as_action = QAction("另存为...", self)
+        save_as_action.setShortcut("Ctrl+Shift+S")
+        save_as_action.triggered.connect(self.save_file_as)
+        file_menu.addAction(save_as_action)
+        
+        file_menu.addSeparator()
+        
+        # 退出
+        exit_action = QAction("退出", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # 编辑菜单
+        edit_menu = menubar.addMenu("编辑")
+        
+        # 撤销/重做等可以在这里添加
+        undo_action = QAction("撤销", self)
+        undo_action.setShortcut("Ctrl+Z")
+        undo_action.triggered.connect(self.undo)
+        edit_menu.addAction(undo_action)
+        
+        redo_action = QAction("重做", self)
+        redo_action.setShortcut("Ctrl+Y")
+        redo_action.triggered.connect(self.redo)
+        edit_menu.addAction(redo_action)
+        
+        edit_menu.addSeparator()
+        
+        delete_action = QAction("删除选中", self)
+        delete_action.setShortcut("Delete")
+        delete_action.triggered.connect(self.delete_selected)
+        edit_menu.addAction(delete_action)
+        
+        # 帮助菜单
+        help_menu = menubar.addMenu("帮助")
+        
+        about_action = QAction("关于", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+    
+    def new_file(self):
+        """新建文件"""
+        if self.current_filepath or self.state.elements:
+            reply = QMessageBox.question(
+                self,
+                "新建文件",
+                "当前有未保存的更改。是否要保存？",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+            )
+            
+            if reply == QMessageBox.Cancel:
+                return
+            elif reply == QMessageBox.Yes:
+                if not self.save_file():
+                    return
+        
+        # 清空状态
+        self.state.clear()
+        self.current_filepath = None
+        self.setWindowTitle("简易易制地图 - 架空类别地图编辑器")
+        
+        # 更新UI控件
+        self.slider_contrast.setValue(int(self.state.contrast * 100))
+        
+        # 重新生成地图
+        self.generate_and_draw()
+    
+    def open_file(self):
+        """打开文件"""
+        if self.current_filepath or self.state.elements:
+            reply = QMessageBox.question(
+                self,
+                "打开文件",
+                "当前有未保存的更改。是否要保存？",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel
+            )
+            
+            if reply == QMessageBox.Cancel:
+                return
+            elif reply == QMessageBox.Yes:
+                if not self.save_file():
+                    return
+        
+        # 选择文件
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "打开地图文件",
+            "",
+            "地图文件 (*.ezmap);;所有文件 (*.*)"
+        )
+        
+        if not file_path:
+            return
+        
+        filepath = Path(file_path)
+        
+        # 加载文件
+        if self.state.load_from_file(filepath):
+            self.current_filepath = filepath
+            self.setWindowTitle(f"简易易制地图 - {filepath.name}")
+            
+            # 更新UI控件
+            self.slider_contrast.setValue(int(self.state.contrast * 100))
+            
+            # 重新生成地图并加载元素
+            self.generate_and_draw()
+            
+            QMessageBox.information(self, "成功", f"已打开文件: {filepath.name}")
+        else:
+            QMessageBox.critical(self, "错误", "打开文件失败")
+    
+    def save_file(self):
+        """保存文件"""
+        if self.current_filepath is None:
+            return self.save_file_as()
+        
+        if self.state.save_to_file(self.current_filepath):
+            QMessageBox.information(self, "成功", f"已保存到: {self.current_filepath.name}")
+            return True
+        else:
+            QMessageBox.critical(self, "错误", "保存文件失败")
+            return False
+    
+    def save_file_as(self):
+        """另存为"""
+        # 选择文件
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "保存地图文件",
+            "",
+            "地图文件 (*.ezmap);;所有文件 (*.*)"
+        )
+        
+        if not file_path:
+            return False
+        
+        # 确保文件扩展名
+        if not file_path.endswith('.ezmap'):
+            file_path += '.ezmap'
+        
+        filepath = Path(file_path)
+        
+        if self.state.save_to_file(filepath):
+            self.current_filepath = filepath
+            self.setWindowTitle(f"简易易制地图 - {filepath.name}")
+            QMessageBox.information(self, "成功", f"已保存到: {filepath.name}")
+            return True
+        else:
+            QMessageBox.critical(self, "错误", "保存文件失败")
+            return False
+    
+    def undo(self):
+        """撤销 - 占位功能"""
+        QMessageBox.information(self, "提示", "撤销功能尚未实现")
+    
+    def redo(self):
+        """重做 - 占位功能"""
+        QMessageBox.information(self, "提示", "重做功能尚未实现")
+    
+    def show_about(self):
+        """显示关于对话框"""
+        QMessageBox.about(
+            self,
+            "关于",
+            "简易易制地图编辑器\n\n"
+            "一个用于创建架空地图的编辑器。\n"
+            "支持房屋、村庄、城市、国家、河流、山川等元素的添加和编辑。\n\n"
+            "版本: 1.0.0\n"
+            "作者: 你的名字"
+        )
 
     def _setup_ui(self) -> None:
         root = QHBoxLayout()
@@ -255,24 +455,24 @@ class EzMapWindow(QMainWindow):
             }
         """)
         
-        # self.btn_cancel_placement = QPushButton("取消放置")
-        # self.btn_cancel_placement.clicked.connect(self._cancel_placement)
-        # self.btn_cancel_placement.setEnabled(False)
-        # self.btn_cancel_placement.setStyleSheet("""
-        #     QPushButton {
-        #         padding: 8px;
-        #         background-color: #6c757d;
-        #         color: white;
-        #         border: none;
-        #         border-radius: 4px;
-        #     }
-        #     QPushButton:hover {
-        #         background-color: #5a6268;
-        #     }
-        # """)
+        self.btn_cancel_placement = QPushButton("取消放置")
+        self.btn_cancel_placement.clicked.connect(self._cancel_placement)
+        self.btn_cancel_placement.setEnabled(False)
+        self.btn_cancel_placement.setStyleSheet("""
+            QPushButton {
+                padding: 8px;
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+        """)
         
         button_layout.addWidget(self.btn_delete)
-        # button_layout.addWidget(self.btn_cancel_placement)
+        button_layout.addWidget(self.btn_cancel_placement)
         left_layout.addLayout(button_layout)
         
         # 状态标签
@@ -320,7 +520,7 @@ class EzMapWindow(QMainWindow):
         self.btn_pick_color.clicked.connect(self.pick_base_color)
         self.slider_contrast = QSlider(Qt.Horizontal)
         self.slider_contrast.setRange(0, 100)
-        self.slider_contrast.setValue(int(self.contrast * 100))
+        self.slider_contrast.setValue(int(self.state.contrast * 100))
         self.slider_contrast.valueChanged.connect(self.on_contrast_changed)
         self.btn_regen = QPushButton("重新生成底图")
         self.btn_regen.clicked.connect(self.generate_and_draw)
@@ -791,7 +991,9 @@ class EzMapWindow(QMainWindow):
     def generate_and_draw(self) -> None:
         # 纯色底图（满足"不要烟熏"的诉求）
         pix = self.renderer.solid_background(
-            self.logic.width, self.logic.height, color=self.base_color, target_size=(2000, 2000)
+            self.logic.width, self.logic.height, 
+            color=self.state.base_color, 
+            target_size=(2000, 2000)
         )
 
         self.scene.clear()
@@ -806,13 +1008,14 @@ class EzMapWindow(QMainWindow):
         self._refresh_property_panel()
 
     def pick_base_color(self) -> None:
-        c = QColorDialog.getColor(self.base_color, self, "选择底图底色")
+        c = QColorDialog.getColor(self.state.base_color, self, "选择底图底色")
         if c.isValid():
-            self.base_color = c
+            self.state.set_background(c, self.state.contrast)
             self.generate_and_draw()
 
     def on_contrast_changed(self, value: int) -> None:
-        self.contrast = max(0.0, min(1.0, value / 100.0))
+        contrast = max(0.0, min(1.0, value / 100.0))
+        self.state.set_background(self.state.base_color, contrast)
         self.generate_and_draw()
 
     def delete_selected(self) -> None:
