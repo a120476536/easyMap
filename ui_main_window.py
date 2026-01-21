@@ -1006,7 +1006,7 @@ class EzMapWindow(QMainWindow):
         pix = self.renderer.solid_background(
             self.logic.width, self.logic.height, 
             color=self.state.base_color, 
-            target_size=(2000, 2000)
+            target_size=(800, 800)
         )
 
         self.scene.clear()
