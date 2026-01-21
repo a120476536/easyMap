@@ -1,7 +1,10 @@
 import random
+import os
+import shutil
+from pathlib import Path
 
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QAction, QColor, QIcon, QPixmap, QPainter, QPen,QPainterPath
+from PySide6.QtCore import Qt, QSize,QRect
+from PySide6.QtGui import QAction, QColor, QIcon, QPixmap, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QColorDialog,
@@ -15,7 +18,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QPushButton,
-    QScrollArea,
     QSpinBox,
     QSlider,
     QTableWidget,
@@ -25,20 +27,25 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QGridLayout,
+    QFileDialog,
+    QMessageBox,
+    QInputDialog,
+    QScrollArea
 )
 
 from canvas_items import ElementItem
 from editor_state import EditorState
-from elements import ElementType
+from elements import ElementType, MapElement
 from map_logic import MapLogic
 from map_renderer import MapRenderer
+
 
 class IconButton(QPushButton):
     """自定义图标按钮，支持图标和文本"""
     def __init__(self, icon, text, parent=None):
         super().__init__(parent)
         self.setIcon(icon)
-        self.setIconSize(QSize(32, 32))  # 增大图标尺寸
+        self.setIconSize(QSize(32, 32))
         
         # 设置按钮文本
         self.setText(text)
@@ -62,8 +69,8 @@ class IconButton(QPushButton):
                 background-color: #d8d8d8;
             }
         """)
-        self.setFixedHeight(80)  # 增加高度给文字留空间
-        self.setFixedWidth(80)   # 设置固定宽度
+        self.setFixedHeight(80)
+        self.setFixedWidth(80)
         
         # 设置按钮布局（图标在上，文字在下）
         self.setLayoutDirection(Qt.LeftToRight)
@@ -71,6 +78,8 @@ class IconButton(QPushButton):
     def sizeHint(self):
         # 返回自定义的大小提示
         return QSize(80, 80)
+
+
 class CollapsibleGroup(QWidget):
     """可折叠/展开的分组容器"""
     def __init__(self, title, parent=None):
@@ -106,7 +115,7 @@ class CollapsibleGroup(QWidget):
         # 内容容器
         self.content_widget = QWidget()
         self.content_widget.setVisible(False)
-        self.content_layout = QGridLayout(self.content_widget)  # 使用GridLayout
+        self.content_layout = QGridLayout(self.content_widget)
         self.content_layout.setContentsMargins(5, 5, 5, 5)
         self.content_layout.setSpacing(5)
         layout.addWidget(self.content_widget)
@@ -151,6 +160,17 @@ class EzMapWindow(QMainWindow):
         self.base_color = QColor("#d9d9d9")
         self.contrast = 0.75
 
+        # 获取项目根目录和图片目录
+        # self.project_root = Path(__file__).parent
+        self.project_root = Path.cwd()
+        self.img_dir = self.project_root / "imgs"
+        # 确保图片目录存在
+        self.img_dir.mkdir(exist_ok=True)
+        
+        # 为每个元素创建独立的图片目录
+        self.custom_img_dir = self.img_dir / "custom"
+        self.custom_img_dir.mkdir(exist_ok=True)
+        
         self.setWindowTitle("简易易制地图 - 架空类别地图编辑器（雏形）")
         self.resize(1200, 760)
         self._setup_ui()
@@ -206,6 +226,11 @@ class EzMapWindow(QMainWindow):
         self._setup_mine_buttons()
         scroll_layout.addWidget(self.mine_group)
 
+        # 自定义元素分类
+        self.custom_group = CollapsibleGroup("自定义")
+        self._setup_custom_buttons()
+        scroll_layout.addWidget(self.custom_group)
+
         # 添加弹性空间
         scroll_layout.addStretch(1)
 
@@ -230,24 +255,24 @@ class EzMapWindow(QMainWindow):
             }
         """)
         
-        self.btn_cancel_placement = QPushButton("取消放置")
-        self.btn_cancel_placement.clicked.connect(self._cancel_placement)
-        self.btn_cancel_placement.setEnabled(False)
-        self.btn_cancel_placement.setStyleSheet("""
-            QPushButton {
-                padding: 8px;
-                background-color: #6c757d;
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #5a6268;
-            }
-        """)
+        # self.btn_cancel_placement = QPushButton("取消放置")
+        # self.btn_cancel_placement.clicked.connect(self._cancel_placement)
+        # self.btn_cancel_placement.setEnabled(False)
+        # self.btn_cancel_placement.setStyleSheet("""
+        #     QPushButton {
+        #         padding: 8px;
+        #         background-color: #6c757d;
+        #         color: white;
+        #         border: none;
+        #         border-radius: 4px;
+        #     }
+        #     QPushButton:hover {
+        #         background-color: #5a6268;
+        #     }
+        # """)
         
         button_layout.addWidget(self.btn_delete)
-        button_layout.addWidget(self.btn_cancel_placement)
+        # button_layout.addWidget(self.btn_cancel_placement)
         left_layout.addLayout(button_layout)
         
         # 状态标签
@@ -325,6 +350,23 @@ class EzMapWindow(QMainWindow):
         self.edit_name.editingFinished.connect(self.on_name_edited)
         form.addRow("名称", self.edit_name)
         prop_layout.addLayout(form)
+        
+        # 添加图片导入按钮
+        self.btn_import_image = QPushButton("导入图片...")
+        self.btn_import_image.clicked.connect(self.import_image)
+        self.btn_import_image.setStyleSheet("""
+            QPushButton {
+                padding: 8px;
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        prop_layout.addWidget(self.btn_import_image)
 
         self.settings_table = QTableWidget(0, 2)
         self.settings_table.setHorizontalHeaderLabels(["字段", "值"])
@@ -356,10 +398,10 @@ class EzMapWindow(QMainWindow):
 
     def _setup_house_buttons(self):
         """设置房屋分类按钮"""
-        # 创建图标
-        house_small_icon = self._create_house_icon(QColor("#c75f3e"), QColor("#f7f2e8"))
-        house_large_icon = self._create_house_icon(QColor("#b84c2e"), QColor("#f0e6d6"))
-        house_fancy_icon = self._create_house_icon(QColor("#a83c1e"), QColor("#e8e0d0"))
+        # 加载本地图片作为图标
+        house_small_icon = self._load_image_icon("house_small.png")
+        house_large_icon = self._load_image_icon("house_large.png")
+        house_fancy_icon = self._load_image_icon("house_fancy.png")
         
         self.btn_house_small = IconButton(house_small_icon, "小屋")
         self.btn_house_small.clicked.connect(lambda: self._prepare_place_element(ElementType.HOUSE_SMALL))
@@ -377,9 +419,9 @@ class EzMapWindow(QMainWindow):
 
     def _setup_village_buttons(self):
         """设置村庄分类按钮"""
-        village_small_icon = self._create_village_icon(QColor("#c75f3e"), 2)
-        village_medium_icon = self._create_village_icon(QColor("#b84c2e"), 3)
-        village_large_icon = self._create_village_icon(QColor("#a83c1e"), 5)
+        village_small_icon = self._load_image_icon("village_small.png")
+        village_medium_icon = self._load_image_icon("village_medium.png")
+        village_large_icon = self._load_image_icon("village_large.png")
         
         self.btn_village_small = IconButton(village_small_icon, "小村庄")
         self.btn_village_small.clicked.connect(lambda: self._prepare_place_element(ElementType.VILLAGE_SMALL))
@@ -397,9 +439,9 @@ class EzMapWindow(QMainWindow):
 
     def _setup_city_buttons(self):
         """设置城市分类按钮"""
-        city_small_icon = self._create_city_icon(QColor("#887058"), QColor("#d0c8b8"))
-        city_medium_icon = self._create_city_icon(QColor("#786048"), QColor("#c8c0b0"))
-        city_large_icon = self._create_city_icon(QColor("#685038"), QColor("#c0b8a8"))
+        city_small_icon = self._load_image_icon("city_small.png")
+        city_medium_icon = self._load_image_icon("city_medium.png")
+        city_large_icon = self._load_image_icon("city_large.png")
         
         self.btn_city_small = IconButton(city_small_icon, "小城")
         self.btn_city_small.clicked.connect(lambda: self._prepare_place_element(ElementType.CITY_SMALL))
@@ -417,9 +459,9 @@ class EzMapWindow(QMainWindow):
 
     def _setup_country_buttons(self):
         """设置国家分类按钮"""
-        country_small_icon = self._create_country_icon(QColor("#d8d8d8"), QColor("#a4b9d6"))
-        country_medium_icon = self._create_country_icon(QColor("#e0e0e0"), QColor("#d4af37"))
-        country_large_icon = self._create_country_icon(QColor("#f0f0f0"), QColor("#a4b9d6"))
+        country_small_icon = self._load_image_icon("country_small.png")
+        country_medium_icon = self._load_image_icon("country_medium.png")
+        country_large_icon = self._load_image_icon("country_large.png")
         
         self.btn_country_small = IconButton(country_small_icon, "小国")
         self.btn_country_small.clicked.connect(lambda: self._prepare_place_element(ElementType.COUNTRY_SMALL))
@@ -437,9 +479,9 @@ class EzMapWindow(QMainWindow):
 
     def _setup_river_buttons(self):
         """设置河流分类按钮"""
-        river_small_icon = self._create_river_icon(QColor("#2b5d80"), 2)
-        river_medium_icon = self._create_river_icon(QColor("#1e4a6f"), 4)
-        river_large_icon = self._create_river_icon(QColor("#0d3559"), 6)
+        river_small_icon = self._load_image_icon("river_small.png")
+        river_medium_icon = self._load_image_icon("river_medium.png")
+        river_large_icon = self._load_image_icon("river_large.png")
         
         self.btn_river_small = IconButton(river_small_icon, "小溪")
         self.btn_river_small.clicked.connect(lambda: self._prepare_place_element(ElementType.RIVER_SMALL))
@@ -457,9 +499,9 @@ class EzMapWindow(QMainWindow):
 
     def _setup_mountain_buttons(self):
         """设置山川分类按钮"""
-        mountain_small_icon = self._create_mountain_icon(QColor("#5c5247"), 3)
-        mountain_medium_icon = self._create_mountain_icon(QColor("#4a4238"), 5)
-        mountain_large_icon = self._create_mountain_icon(QColor("#383129"), 7)
+        mountain_small_icon = self._load_image_icon("mountain_small.png")
+        mountain_medium_icon = self._load_image_icon("mountain_medium.png")
+        mountain_large_icon = self._load_image_icon("mountain_large.png")
         
         self.btn_mountain_small = IconButton(mountain_small_icon, "小山")
         self.btn_mountain_small.clicked.connect(lambda: self._prepare_place_element(ElementType.MOUNTAIN_SMALL))
@@ -477,10 +519,10 @@ class EzMapWindow(QMainWindow):
 
     def _setup_mine_buttons(self):
         """设置矿场分类按钮"""
-        mine_coal_icon = self._create_mine_icon(QColor("#333333"), QColor("#666666"))
-        mine_iron_icon = self._create_mine_icon(QColor("#5c5c5c"), QColor("#b8b8b8"))
-        mine_gold_icon = self._create_mine_icon(QColor("#d4af37"), QColor("#ffd700"))
-        mine_gem_icon = self._create_mine_icon(QColor("#4169e1"), QColor("#9370db"))
+        mine_coal_icon = self._load_image_icon("mine_coal.png")
+        mine_iron_icon = self._load_image_icon("mine_iron.png")
+        mine_gold_icon = self._load_image_icon("mine_gold.png")
+        mine_gem_icon = self._load_image_icon("mine_gem.png")
         
         self.btn_mine_coal = IconButton(mine_coal_icon, "煤矿")
         self.btn_mine_coal.clicked.connect(lambda: self._prepare_place_element(ElementType.MINE_COAL))
@@ -494,177 +536,195 @@ class EzMapWindow(QMainWindow):
         self.btn_mine_gem = IconButton(mine_gem_icon, "宝石矿")
         self.btn_mine_gem.clicked.connect(lambda: self._prepare_place_element(ElementType.MINE_GEM))
         
-        # 水平排列，一行四个（使用跨列）
+        # 水平排列，一行四个
         self.mine_group.add_widget(self.btn_mine_coal, 0, 0)
         self.mine_group.add_widget(self.btn_mine_iron, 0, 1)
         self.mine_group.add_widget(self.btn_mine_gold, 0, 2)
-        self.mine_group.add_widget(self.btn_mine_gem, 0, 3)  # 放在同一行第4列
-        
-        # 设置列拉伸，让4个按钮均匀分布
-        for i in range(4):
-            self.mine_group.content_layout.setColumnStretch(i, 1)
+        self.mine_group.add_widget(self.btn_mine_gem, 0, 3)
 
-    def _create_house_icon(self, roof_color, wall_color):
-        """创建房屋图标"""
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # 墙壁
-        painter.setBrush(wall_color)
-        painter.setPen(QPen(QColor("#1e1e1e"), 1))
-        painter.drawRect(8, 16, 16, 12)
-        
-        # 屋顶
-        painter.setBrush(roof_color)
-        path = QPainterPath()
-        path.moveTo(6, 16)
-        path.lineTo(16, 6)
-        path.lineTo(26, 16)
-        path.closeSubpath()
-        painter.drawPath(path)
-        
-        painter.end()
-        return QIcon(pixmap)
+    def _setup_custom_buttons(self):
+        """设置自定义分类按钮"""
+        self.btn_custom = QPushButton("添加自定义元素")
+        self.btn_custom.clicked.connect(self.add_custom_element)
+        self.btn_custom.setStyleSheet("""
+            QPushButton {
+                padding: 8px;
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        self.custom_group.add_widget(self.btn_custom, 0, 0)
 
-    def _create_village_icon(self, color, house_count):
-        """创建村庄图标"""
+    def _load_image_icon(self, image_name):
+        """加载本地图片作为图标"""
+        img_path = self.img_dir / image_name
+        if img_path.exists():
+            return QIcon(str(img_path))
+        else:
+            # 如果图片不存在，返回默认图标
+            print(f"提示：系统图片不存在: {img_path}，将使用默认图标")
+            return self._create_default_icon(image_name)
+
+    def _create_default_icon(self, image_name):
+        """创建默认图标（当图片不存在时使用）"""
         pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
+        pixmap.fill(QColor("#e0e0e0"))
         painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor("#808080"), 1))
+        painter.drawRect(2, 2, 28, 28)
         
-        if house_count == 2:
-            positions = [(8, 16), (20, 18)]
-        elif house_count == 3:
-            positions = [(6, 18), (16, 16), (26, 18)]
-        else:  # 5
-            positions = [(4, 20), (12, 16), (20, 14), (16, 22), (24, 20)]
-        
-        for x, y in positions[:house_count]:
-            painter.save()
-            painter.translate(x, y)
-            painter.scale(0.5, 0.5)
-            painter.setBrush(QColor("#f7f2e8"))
-            painter.setPen(QPen(QColor("#1e1e1e"), 1))
-            painter.drawRect(-6, -3, 12, 9)
+        # 根据图片名显示简写
+        short_name = "默认"
+        if "house" in image_name:
+            short_name = "房"
+        elif "village" in image_name:
+            short_name = "村"
+        elif "city" in image_name:
+            short_name = "城"
+        elif "country" in image_name:
+            short_name = "国"
+        elif "river" in image_name:
+            short_name = "河"
+        elif "mountain" in image_name:
+            short_name = "山"
+        elif "mine" in image_name:
+            short_name = "矿"
             
-            painter.setBrush(color)
-            path = QPainterPath()
-            path.moveTo(-6, -3)
-            path.lineTo(0, -9)
-            path.lineTo(6, -3)
-            path.closeSubpath()
-            painter.drawPath(path)
-            painter.restore()
-        
+        painter.drawText(QRect(0, 0, 32, 32), Qt.AlignCenter, short_name)
         painter.end()
         return QIcon(pixmap)
 
-    def _create_city_icon(self, wall_color, building_color):
-        """创建城市图标"""
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
+    def import_image(self):
+        """导入图片功能"""
+        # 获取当前选中的元素
+        e = self.state.get(self.state.selected_id)
+        if not e:
+            QMessageBox.warning(self, "警告", "请先选择一个元素")
+            return
         
-        # 城墙
-        painter.setBrush(wall_color)
-        painter.setPen(QPen(QColor("#1e1e1e"), 1))
-        painter.drawRect(6, 8, 20, 4)
+        # 打开文件对话框选择图片
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择图片文件",
+            "",
+            "图片文件 (*.png *.jpg *.jpeg *.bmp *.gif);;所有文件 (*.*)"
+        )
         
-        # 建筑
-        painter.setBrush(building_color)
-        painter.drawRect(10, 12, 12, 16)
+        if not file_path:
+            return
         
-        # 塔楼
-        painter.setBrush(QColor("#b8a890"))
-        painter.drawRect(6, 6, 5, 14)
-        painter.drawRect(21, 6, 5, 14)
+        # 获取文件扩展名
+        file_ext = Path(file_path).suffix.lower()
         
-        painter.end()
-        return QIcon(pixmap)
+        # 为元素创建专门的图片文件名
+        img_filename = f"{e.id}{file_ext}"
+        dest_path = self.custom_img_dir / img_filename
+        
+        try:
+            # 复制图片到自定义图片目录
+            shutil.copy2(file_path, dest_path)
+            
+            # 保存相对于项目根目录的路径，确保格式正确
+            # 路径格式应该是: imgs/custom/{element_id}.{ext}
+            relative_path = f"imgs/custom/{img_filename}"
+            
+            print(f"保存图片路径: {relative_path}")  # 调试信息
+            print(f"完整目标路径: {dest_path}")  # 调试信息
+            print(f"文件是否存在: {dest_path.exists()}")  # 调试信息
+            
+            self.state.update_setting(e.id, "图片路径", relative_path)
+            
+            # 刷新属性面板
+            self._refresh_property_panel()
+            
+            # 重新创建元素项以显示新图片
+            self._recreate_element_item(e.id)
+            
+            QMessageBox.information(self, "成功", f"图片已导入并设置为元素图标")
+            
+        except Exception as ex:
+            QMessageBox.critical(self, "错误", f"导入图片失败: {str(ex)}")
 
-    def _create_country_icon(self, bg_color, emblem_color):
-        """创建国家图标"""
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # 背景
-        painter.setBrush(bg_color)
-        painter.setPen(QPen(QColor("#1a1a1a"), 1))
-        painter.drawRect(6, 6, 20, 20)
-        
-        # 徽章
-        painter.setBrush(emblem_color)
-        painter.drawEllipse(12, 12, 8, 8)
-        
-        painter.end()
-        return QIcon(pixmap)
+    # 添加新的辅助方法
+    def _recreate_element_item(self, element_id: str):
+        """重新创建元素项（用于更新图片显示）"""
+        if element_id in self._element_items:
+            item = self._element_items[element_id]
+            self.scene.removeItem(item)
+            
+            e = self.state.get(element_id)
+            if e:
+                new_item = ElementItem(e)
+                new_item.clicked.connect(self.select_element)
+                if "RIVER" in e.type.name or "MOUNTAIN" in e.type.name:
+                    new_item.set_polyline_from_element(e)
+                self.scene.addItem(new_item)
+                self._element_items[element_id] = new_item
+                
+                # 重新选中该元素
+                self.select_element(element_id)
 
-    def _create_river_icon(self, color, width):
-        """创建河流图标"""
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        painter.setPen(QPen(color, width, Qt.SolidLine, Qt.RoundCap))
-        path = QPainterPath()
-        path.moveTo(4, 8)
-        path.cubicTo(10, 4, 18, 12, 28, 6)
-        path.cubicTo(24, 16, 16, 24, 6, 28)
-        painter.drawPath(path)
-        
-        painter.end()
-        return QIcon(pixmap)
 
-    def _create_mountain_icon(self, color, width):
-        """创建山川图标"""
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
+    def add_custom_element(self):
+        """添加自定义元素"""
+        # 询问自定义元素的名称
+        name, ok = QInputDialog.getText(
+            self, "自定义元素", "请输入元素名称:"
+        )
         
-        painter.setPen(QPen(color, width, Qt.SolidLine, Qt.RoundCap))
-        path = QPainterPath()
-        path.moveTo(4, 24)
-        path.lineTo(12, 8)
-        path.lineTo(20, 16)
-        path.lineTo(28, 4)
-        painter.drawPath(path)
-        
-        painter.end()
-        return QIcon(pixmap)
+        if ok and name:
+            # 在场景中心位置创建自定义元素
+            x, y = self._get_scene_center()
+            
+            e = self.state.create_element(
+                t=ElementType.CUSTOM,
+                name=name,
+                parent_id=None,
+                x=x,
+                y=y
+            )
+            
+            self._add_item_for_element(e)
+            self._rebuild_tree()
+            self.select_element(e.id)
+            
+            QMessageBox.information(
+                self,
+                "提示",
+                f"自定义元素 '{name}' 已添加。\n\n请选中该元素，然后点击'导入图片'按钮为其添加图标。"
+            )
 
-    def _create_mine_icon(self, mine_color, ore_color):
-        """创建矿场图标"""
-        pixmap = QPixmap(32, 32)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-        
-        # 矿洞
-        painter.setBrush(mine_color)
-        painter.setPen(QPen(QColor("#2e1d12"), 1))
-        path = QPainterPath()
-        path.moveTo(8, 20)
-        path.quadTo(16, 12, 24, 20)
-        path.lineTo(24, 28)
-        path.lineTo(8, 28)
-        path.closeSubpath()
-        painter.drawPath(path)
-        
-        # 矿石
-        painter.setBrush(ore_color)
-        painter.drawEllipse(12, 16, 4, 4)
-        painter.drawEllipse(18, 20, 4, 4)
-        
-        painter.end()
-        return QIcon(pixmap)
+    def _get_scene_center(self):
+        """获取场景中心位置"""
+        center = self.view.mapToScene(self.view.viewport().rect().center())
+        return center.x(), center.y()
+
+    def _update_element_display(self, element_id: str):
+        """更新地图上元素的显示"""
+        if element_id in self._element_items:
+            item = self._element_items[element_id]
+            if hasattr(item, 'update_display_size'):
+                item.update_display_size()
+            else:
+                # 备用方案：重新创建元素
+                self.scene.removeItem(item)
+                e = self.state.get(element_id)
+                if e:
+                    new_item = ElementItem(e)
+                    new_item.clicked.connect(self.select_element)
+                    if "RIVER" in e.type.name or "MOUNTAIN" in e.type.name:
+                        new_item.set_polyline_from_element(e)
+                    self.scene.addItem(new_item)
+                    self._element_items[element_id] = new_item
+                    
+                    # 重新选中该元素
+                    self.select_element(element_id)
+
 
     def _prepare_place_element(self, element_type: ElementType) -> None:
         """准备放置元素：选择类型后等待用户点击画布"""
@@ -850,6 +910,7 @@ class EzMapWindow(QMainWindow):
         self.state.update_name(e.id, name)
         self._rebuild_tree()
 
+    
     def on_setting_item_changed(self, item: QTableWidgetItem) -> None:
         e = self.state.get(self.state.selected_id)
         if not e:
@@ -859,7 +920,13 @@ class EzMapWindow(QMainWindow):
         key_item = self.settings_table.item(item.row(), 0)
         if not key_item:
             return
-        self.state.update_setting(e.id, key_item.text(), item.text())
+        key = key_item.text()
+        value = item.text()
+        self.state.update_setting(e.id, key, value)
+        
+        # 如果修改了图片尺寸，立即更新显示
+        if key in ["图片宽度", "图片高度"]:
+            self._update_element_display(e.id)
 
     def on_zoom_changed(self, value: int) -> None:
         # 重置再按比例缩放，避免积累
