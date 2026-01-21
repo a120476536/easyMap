@@ -65,8 +65,8 @@ def default_settings_for(t: ElementType) -> Dict[str, Any]:
         "资源": "",
         "备注": "",
         "图片路径": "",  # 新增图片路径字段
-        "图片宽度": "64",  # 新增图片宽度字段，默认64
-        "图片高度": "64",  # 新增图片高度字段，默认64
+        "图片宽度": "",  # 修改：空字符串表示使用原始尺寸
+        "图片高度": "",  # 修改：空字符串表示使用原始尺寸
     }
     
     if t in {ElementType.RIVER_SMALL, ElementType.RIVER_MEDIUM, ElementType.RIVER_LARGE,
@@ -130,11 +130,26 @@ class MapElement:
     def get_image_size(self) -> Tuple[int, int]:
         """获取图片显示尺寸"""
         try:
-            width = int(self.settings.get("图片宽度", "64"))
-            height = int(self.settings.get("图片高度", "64"))
-            return max(1, width), max(1, height)  # 确保最小为1
+            width_str = self.settings.get("图片宽度", "")
+            height_str = self.settings.get("图片高度", "")
+            
+            # 如果都为空，返回0表示使用原始尺寸
+            if width_str == "" and height_str == "":
+                return 0, 0
+                
+            # 解析宽度
+            width = 0
+            if width_str and width_str.strip():
+                width = int(width_str)
+                
+            # 解析高度
+            height = 0
+            if height_str and height_str.strip():
+                height = int(height_str)
+                
+            return width, height
         except (ValueError, TypeError):
-            return 64, 64  # 默认值
+            return 0, 0  # 返回0表示使用原始尺寸
     
     def to_dict(self) -> Dict[str, Any]:
         """将元素转换为字典（用于序列化）"""

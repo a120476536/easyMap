@@ -97,14 +97,35 @@ class ElementItem(QGraphicsObject):
             
         width, height = self.element.get_image_size()
         
-        if width > 0 and height > 0:
-            self.display_pixmap = self.original_pixmap.scaled(
-                width, height,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-        else:
+        # 如果都没设置，使用原始尺寸
+        if width <= 0 and height <= 0:
             self.display_pixmap = self.original_pixmap
+            return
+            
+        original_width = self.original_pixmap.width()
+        original_height = self.original_pixmap.height()
+        
+        # 计算目标尺寸
+        if width > 0 and height <= 0:
+            # 只设置了宽度，高度按原始比例计算（但不是强制保持比例）
+            height = int(original_height * (width / original_width))
+        elif height > 0 and width <= 0:
+            # 只设置了高度，宽度按原始比例计算（但不是强制保持比例）
+            width = int(original_width * (height / original_height))
+        elif width > 0 and height > 0:
+            # 两个都设置了，就使用设置的值
+            pass
+        
+        # 确保最小尺寸为1
+        width = max(1, width)
+        height = max(1, height)
+        
+        # 使用 IgnoreAspectRatio 进行自由拉伸
+        self.display_pixmap = self.original_pixmap.scaled(
+            width, height,
+            Qt.IgnoreAspectRatio,  # 重要：忽略宽高比，自由拉伸
+            Qt.SmoothTransformation
+        )
 
     def _load_default_image(self):
         """加载系统默认图片（仅当没有自定义图片时调用）"""
@@ -151,21 +172,39 @@ class ElementItem(QGraphicsObject):
     def _create_default_icon(self):
         """创建默认图标"""
         width, height = self.element.get_image_size()
-        size = max(width, height, 64)
         
-        pixmap = QPixmap(size, size)
+        # 如果都没设置，使用默认尺寸
+        if width <= 0 and height <= 0:
+            width = height = 64
+        elif width > 0 and height <= 0:
+            height = width  # 默认图标保持方形
+        elif height > 0 and width <= 0:
+            width = height  # 默认图标保持方形
+        
+        # 确保最小尺寸
+        width = max(1, width)
+        height = max(1, height)
+        
+        pixmap = QPixmap(width, height)
         pixmap.fill(Qt.transparent)
         
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
         
-        # 绘制背景圆形
-        painter.setBrush(QColor("#e0e0e0"))
-        painter.setPen(QPen(QColor("#808080"), 2))
-        painter.drawEllipse(4, 4, size-8, size-8)
+        # 绘制背景圆形（如果图标是方形）
+        if width == height:
+            painter.setBrush(QColor("#e0e0e0"))
+            painter.setPen(QPen(QColor("#808080"), 2))
+            painter.drawEllipse(4, 4, width-8, height-8)
+        else:
+            # 如果是长方形，绘制圆角矩形
+            painter.setBrush(QColor("#e0e0e0"))
+            painter.setPen(QPen(QColor("#808080"), 2))
+            radius = min(width, height) // 4
+            painter.drawRoundedRect(4, 4, width-8, height-8, radius, radius)
         
         # 绘制元素类型简写
-        font_size = min(14, size//4)
+        font_size = min(14, min(width, height)//4)
         painter.setFont(QFont("Arial", font_size, QFont.Bold))
         painter.setPen(QColor("#404040"))
         
@@ -187,7 +226,7 @@ class ElementItem(QGraphicsObject):
         elif "MINE" in self.element_type.name:
             type_text = "矿"
             
-        painter.drawText(QRectF(0, 0, size, size), Qt.AlignCenter, type_text)
+        painter.drawText(QRectF(0, 0, width, height), Qt.AlignCenter, type_text)
         painter.end()
         
         self.original_pixmap = pixmap
@@ -278,6 +317,7 @@ class ElementItem(QGraphicsObject):
                 content += f"\n图片: {Path(image_path).name}"
             content += f"\n原尺寸: {original_width}×{original_height}"
             content += f"\n显示尺寸: {display_width}×{display_height}"
+            content += f"\n拉伸模式: 自由拉伸"
         
         self.tooltip_text.setText(content)
 

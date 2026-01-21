@@ -3,7 +3,7 @@ import os
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSize, QRect
+from PySide6.QtCore import Qt, QSize, QRect, QTimer
 from PySide6.QtGui import QAction, QColor, QIcon, QPixmap, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -159,6 +159,12 @@ class EzMapWindow(QMainWindow):
         
         # 当前文件路径
         self.current_filepath: Path = None
+        
+        # 用于延迟更新图片尺寸的定时器
+        self._update_timer = QTimer()
+        self._update_timer.setSingleShot(True)
+        self._update_timer.setInterval(500)  # 500ms延迟
+        self._update_timer.timeout.connect(self._delayed_update_elements)
 
         # 获取项目根目录和图片目录
         self.project_root = Path.cwd()
@@ -375,6 +381,12 @@ class EzMapWindow(QMainWindow):
             "版本: 1.0.0\n"
             "作者: 你的名字"
         )
+    
+    def _delayed_update_elements(self):
+        """延迟更新元素显示（避免频繁更新）"""
+        e = self.state.get(self.state.selected_id)
+        if e:
+            self._update_element_display(e.id)
 
     def _setup_ui(self) -> None:
         root = QHBoxLayout()
@@ -574,6 +586,10 @@ class EzMapWindow(QMainWindow):
         self.settings_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.settings_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
         self.settings_table.itemChanged.connect(self.on_setting_item_changed)
+        
+        # 添加单元格编辑完成的信号连接
+        self.settings_table.cellChanged.connect(self.on_setting_cell_changed)
+        
         self.settings_table.setStyleSheet("""
             QTableWidget {
                 border: 1px solid #dee2e6;
@@ -850,7 +866,6 @@ class EzMapWindow(QMainWindow):
         except Exception as ex:
             QMessageBox.critical(self, "错误", f"导入图片失败: {str(ex)}")
 
-    # 添加新的辅助方法
     def _recreate_element_item(self, element_id: str):
         """重新创建元素项（用于更新图片显示）"""
         if element_id in self._element_items:
@@ -868,7 +883,6 @@ class EzMapWindow(QMainWindow):
                 
                 # 重新选中该元素
                 self.select_element(element_id)
-
 
     def add_custom_element(self):
         """添加自定义元素"""
@@ -924,7 +938,6 @@ class EzMapWindow(QMainWindow):
                     
                     # 重新选中该元素
                     self.select_element(element_id)
-
 
     def _prepare_place_element(self, element_type: ElementType) -> None:
         """准备放置元素：选择类型后等待用户点击画布"""
@@ -1113,7 +1126,6 @@ class EzMapWindow(QMainWindow):
         self.state.update_name(e.id, name)
         self._rebuild_tree()
 
-    
     def on_setting_item_changed(self, item: QTableWidgetItem) -> None:
         e = self.state.get(self.state.selected_id)
         if not e:
@@ -1129,7 +1141,18 @@ class EzMapWindow(QMainWindow):
         
         # 如果修改了图片尺寸，立即更新显示
         if key in ["图片宽度", "图片高度"]:
-            self._update_element_display(e.id)
+            self._update_timer.start()  # 使用定时器延迟更新，避免频繁刷新
+
+    def on_setting_cell_changed(self, row, column):
+        """单元格内容改变时立即更新"""
+        if column == 1:
+            key_item = self.settings_table.item(row, 0)
+            value_item = self.settings_table.item(row, 1)
+            if key_item and value_item:
+                key = key_item.text()
+                if key in ["图片宽度", "图片高度"]:
+                    # 立即开始延迟更新
+                    self._update_timer.start()
 
     def on_zoom_changed(self, value: int) -> None:
         # 重置再按比例缩放，避免积累
